@@ -40,11 +40,12 @@ Telegram Trigger
                 └── Sort + Limit (obtiene el último estado registrado)
                     └── Switch_Principal (enruta según el estado actual)
                         ├── pantalla vacía / MENU_PRINCIPAL → menú de opciones
-                        ├── ESPERANDO_TIPO     → selección de tipo de solicitud
-                        ├── ESPERANDO_PRIORIDAD → selección de prioridad
+                        ├── ESPERANDO_TIPO        → selección de tipo de solicitud
+                        ├── ESPERANDO_PRIORIDAD   → selección de prioridad
                         ├── ESPERANDO_DESCRIPCION → captura de descripción
-                        ├── ESPERANDO_TICKET   → búsqueda de ticket específico
-                        └── fallback           → reset y mensaje de error
+                        ├── ESPERANDO_TICKET      → búsqueda de ticket específico
+                        ├── ESPERANDO_REPORTE     → submenú de reportes
+                        └── fallback              → reset y mensaje de error
 ```
 
 ---
@@ -57,7 +58,7 @@ Flujo conversacional de 3 pasos para registrar un nuevo ticket:
 - Selección de prioridad (Baja / Media / Alta)
 - Descripción libre del problema
 
-Al finalizar se genera un ID de ticket en formato `TIC-XXXX` y se confirma al usuario.
+Al finalizar se genera un ID de ticket en formato `TIC-XXXX` y se confirma al usuario. Cada vez que se crea una solicitud nueva, el sistema actualiza automáticamente el estado de las últimas 5 solicitudes previas del usuario asignándoles un estado aleatorio del ciclo (`ABIERTO → Pendiente → En revisión → Aprobada → Completada → Cerrada`).
 
 ### 2. Consultar estado de solicitud
 Permite al usuario ingresar un número de ticket (`TIC-XXXX`) para consultar su estado actual, tipo y descripción registrada.
@@ -65,8 +66,42 @@ Permite al usuario ingresar un número de ticket (`TIC-XXXX`) para consultar su 
 ### 3. Mis solicitudes
 Lista todas las solicitudes creadas por el usuario con su estado actual, tipo, descripción y fecha de creación.
 
-### 4. Reportes *(en desarrollo)*
-Sección reservada para futuras funcionalidades de reportes.
+### 4. Reportes
+Módulo de análisis que genera estadísticas agregadas sobre todas las solicitudes del sistema. Al seleccionar esta opción, el bot presenta un submenú:
+
+```
+1. Reporte por tipo de solicitud
+9. Volver al menú principal
+```
+
+**Reporte por tipo de solicitud** genera dos mensajes consecutivos:
+
+- **Mensaje 1:** confirmación de que el reporte está siendo procesado.
+- **Mensaje 2:** reporte completo con el siguiente formato:
+
+```
+📊 Reporte de solicitudes
+
+Resumen general
+- Tipo más frecuente: Soporte técnico
+- Total solicitudes: 24
+- Interacciones con el bot: 60
+
+Detalle por tipo
+1) Soporte técnico
+   - Total: 12
+   - ABIERTO: 4
+   - En revisión: 5
+   - Completada: 3
+
+2) Solicitud administrativa
+   - Total: 8
+   - Pendiente: 2
+   - Aprobada: 3
+   - Cerrada: 3
+```
+
+El reporte lee en tiempo real la hoja `SOLICITUDES` para los conteos por tipo y estado, y la hoja `LOGS` para el total de interacciones con el bot.
 
 ### 5. Configuración *(en desarrollo)*
 Sección reservada para configuración de preferencias del usuario.
@@ -109,6 +144,7 @@ Persiste el estado de la conversación de cada usuario. El bot lee siempre el re
 | `ESPERANDO_PRIORIDAD` | Esperando selección de prioridad |
 | `ESPERANDO_DESCRIPCION` | Esperando descripción libre del problema |
 | `ESPERANDO_TICKET` | Esperando que el usuario ingrese un ID de ticket |
+| `ESPERANDO_REPORTE` | Esperando selección dentro del submenú de reportes |
 
 ### Hoja `SOLICITUDES`
 Almacena todos los tickets creados.
@@ -119,7 +155,7 @@ Almacena todos los tickets creados.
 | `tipo` | texto | Tipo de solicitud |
 | `prioridad` | texto | Prioridad asignada |
 | `descripcion` | texto | Descripción ingresada por el usuario |
-| `estado` | texto | Estado del ticket (`ABIERTO`, etc.) |
+| `estado` | texto | Estado del ticket (`ABIERTO`, `Pendiente`, `En revisión`, `Aprobada`, `Completada`, `Cerrada`) |
 | `creado_por` | texto | Nombre del usuario (first_name de Telegram) |
 | `fecha_creacion` | datetime | Fecha de creación |
 
@@ -227,28 +263,83 @@ Bot: ✅ Ticket encontrado:
      📝 Descripción: No puedo acceder al sistema de facturación
 ```
 
+### Ver reportes (opción 4)
+
+```
+Usuario: 4
+Bot: 📊 Reportes
+
+     Selecciona una opción:
+     1. Reporte por tipo de solicitud
+     9. Volver al menú principal
+
+Usuario: 1
+Bot: ⏳ Perfecto, estoy generando el reporte de solicitudes...
+
+Bot: 📊 Reporte de solicitudes
+
+     Resumen general
+     - Tipo más frecuente: Soporte técnico
+     - Total solicitudes: 24
+     - Interacciones con el bot: 60
+
+     Detalle por tipo
+     1) Soporte técnico
+        - Total: 12
+        - ABIERTO: 4
+        - En revisión: 5
+        - Completada: 3
+
+     2) Solicitud administrativa
+        - Total: 8
+        - Pendiente: 2
+        - Aprobada: 3
+        - Cerrada: 3
+```
+
 ---
 
 ## Estructura de nodos n8n
 
-El flujo contiene **41 nodos** organizados en las siguientes categorías:
+El flujo contiene **61 nodos** organizados en las siguientes categorías:
 
 | Categoría | Nodos | Función |
 |---|---|---|
 | **Trigger** | `Telegram Trigger` | Recibe todos los mensajes entrantes |
 | **Validación** | `Check_Usuario`, `Validar_Activo` | Controla acceso al bot |
 | **Estado** | `Cargar_Estado`, `Sort1`, `Limit1` | Lee el último estado del usuario |
-| **Enrutamiento** | `Switch_Principal`, `Switch_Opciones_Menu`, `Switch_Tipos`, `Switch_Prioridad` | Dirige el flujo según el estado y la opción elegida |
-| **Mensajes** | 12 nodos `Msg_*` | Envían respuestas al usuario |
-| **Datos** | 10 nodos Google Sheets | Leen y escriben en la base de datos |
-| **Lógica** | `nuevo_estado`, `Code in JavaScript` | Procesan datos con código JavaScript |
-| **Logs** | 7 nodos `Log_*` | Registran el estado actualizado en LOGS |
+| **Enrutamiento** | `Switch_Principal`, `Switch_Opciones_Menu`, `Switch_Tipos`, `Switch_Prioridad`, `Switch_Submenu_Reportes` | Dirige el flujo según el estado y la opción elegida |
+| **Mensajes** | 15 nodos `Msg_*` | Envían respuestas al usuario |
+| **Datos** | 12 nodos Google Sheets | Leen y escriben en la base de datos |
+| **Lógica** | `nuevo_estado`, `Code in JavaScript`, `Code_Extraer_TP`, `Code_Calcular_Reporte_V2`, `Code_Merge_Reporte`, `Colapsar_A_Un_Item` | Procesan datos con código JavaScript |
+| **Logs** | 8 nodos `Log_*` | Registran el estado actualizado en LOGS |
+
+### Nodos del módulo de Reportes
+
+| Nodo | Tipo | Función |
+|---|---|---|
+| `Msg_Submenu_Reportes` | Telegram | Muestra el submenú de reportes |
+| `Log_Esperando_Reporte` | Google Sheets | Persiste el estado `ESPERANDO_REPORTE` |
+| `Switch_Submenu_Reportes` | Switch | Enruta según la opción elegida en el submenú |
+| `Msg_Procesando_Reporte` | Telegram | Primer mensaje: confirmación de procesamiento |
+| `Leer_Todas_Solicitudes` | Google Sheets | Lee todas las filas de la hoja SOLICITUDES |
+| `Code_Calcular_Reporte_V2` | Code | Agrupa por tipo y estado, calcula el tipo más frecuente |
+| `Leer_Logs_Reporte` | Google Sheets | Lee todos los registros de LOGS para contar interacciones |
+| `Code_Merge_Reporte` | Code | Combina los datos de solicitudes y logs en el mensaje final |
+| `Msg_Reporte_Final` | Telegram | Segundo mensaje: reporte completo formateado |
+| `Log_Reporte_V2` | Google Sheets | Registra la acción en LOGS y resetea el estado |
 
 ---
 
 ## Consideraciones técnicas
 
 **Manejo de estado entre ejecuciones:** n8n no tiene memoria entre ejecuciones. El estado de la conversación se persiste completamente en la hoja `LOGS`. Cada mensaje del usuario dispara una ejecución nueva que lee el último registro de LOGS para saber qué hacer.
+
+**Recuperación de tipo y prioridad al guardar:** Dado que n8n no mantiene variables entre ejecuciones, el tipo y la prioridad elegidos por el usuario en pasos anteriores se recuperan leyendo los registros recientes de LOGS del usuario (`pantalla = ESPERANDO_PRIORIDAD` para el tipo, `pantalla = ESPERANDO_DESCRIPCION` para la prioridad) y mapeando el número ingresado al texto correspondiente.
+
+**Actualización automática de estados:** Al crear una solicitud nueva, el sistema busca las últimas 5 solicitudes del usuario, calcula un nuevo estado aleatorio para cada una dentro del ciclo `ABIERTO → Pendiente → En revisión → Aprobada → Completada → Cerrada`, y actualiza cada fila en Google Sheets antes de guardar la solicitud nueva.
+
+**Reporte en tiempo real:** El módulo de reportes no usa datos precalculados — lee la hoja `SOLICITUDES` completa en el momento de la consulta, agrupa por tipo y estado en JavaScript, y cruza con el conteo total de filas en `LOGS` para las interacciones.
 
 **Identificación de usuarios:** El bot usa el **ID numérico de Telegram** (`message.from.id`) para identificar usuarios en las hojas `USUARIOS` y `LOGS`. La hoja `SOLICITUDES` usa `first_name` en el campo `creado_por` — se recomienda migrar a ID numérico para mayor robustez.
 
